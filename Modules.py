@@ -158,6 +158,52 @@ class Decoder(nn.Module):
         #print("after", output.size())
         y = self.y(output)
         return y
+
+	
+    def predict(self, x, h, c, z):
+        out = []
+        tmp = 0.5
+        new_input = torch.cat((x[:, 0, :].contiguous().view(self.batchSize, 1, 5), z.view(self.batchSize, 1, self.Nz)), 2)
+        
+        for i in range(0,250):
+            y, (h, c) = self.cell(new_input, (h, c))
+            output = y.contiguous().view(-1, self.Nhd)
+            y = self.y(output)
+            z_pen_logits = y[:, -3:]
+            z_pi, z_mu1, z_mu2, z_sigma1, z_sigma2, z_corr = torch.chunk(y[:, :-3], 6, dim=1)
+            z_pi = F.softmax(z_pi / tmp)
+            z_pen_logits = F.softmax(z_pen_logits / tmp )
+            z_sigma1 = torch.exp(z_sigma1)
+            z_sigma2 = torch.exp(z_sigma2)
+            z_corr = F.tanh(z_corr)
+            #normalize the probs to get 1 
+
+            probs = z_pi.data[0].numpy()
+            probs /= probs.sum()
+            i = np.random.choice(np.arange(0, 2), p= probs)
+
+            mean = [z_mu1.data[0][i], z_mu2.data[0][i]]
+            cov = [[z_sigma1.data[0][i] * z_sigma1.data[0][i] * tmp, z_corr.data[0][i] * z_sigma1.data[0][i] * z_sigma2.data[0][i]], \
+                   [z_corr.data[0][i] * z_sigma1.data[0][i] * z_sigma2.data[0][i], z_sigma2.data[0][i] * z_sigma2.data[0][i] * tmp]]
+
+            x = np.random.multivariate_normal(mean, cov)
+            probs = z_pen_logits.data[0].numpy()
+            probs /= probs.sum()
+            iPen = np.random.choice(np.arange(0, 3), p=probs)
+            pen = [0, 0, 0]
+            pen[iPen] = 1
+        
+            stroke = [x[0], x[1]] + pen
+            print(stroke)
+            
+            if iPen == 2:
+                break
+            
+            out.append(stroke)    
+            stroke = Variable(torch.FloatTensor(stroke))
+            new_input = torch.cat((stroke.contiguous().view(self.batchSize, 1, 5), z.view(self.batchSize, 1, self.Nz)), 2)
+            
+        return out
         
 class SketchRNN(nn.Module):
     
@@ -180,6 +226,11 @@ class SketchRNN(nn.Module):
         y = self.decoder(new_input, h0[:,:self.Nhd].contiguous(), h0[:,self.Nhd:].contiguous())
         #y = self.decoder(new_input, h0[:,:self.Nhd], h0[:,self.Nhd:])
         return y, mu, sigma
+
+    def predict(self, x):
+        
+        h0, z, mu, sigma = self.encoder(x[:, 1:250+1, :])
+        y = self.decoder.predict(x[:, :250, :], h0[:,:self.Nhd], h0[:,self.Nhd:], z)
     
 #class VAE(nn.Module):
 #    
