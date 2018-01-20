@@ -15,6 +15,7 @@ from torch.autograd import Variable
 global CUDA
 CUDA = True
 
+
 def bi_normal(x1, x2, mu1, mu2, s1, s2, rho,M):
 
     pre_x1 = x1.contiguous().view(-1, 1).expand(x1.size(0), M)
@@ -35,8 +36,7 @@ def bi_normal(x1, x2, mu1, mu2, s1, s2, rho,M):
     result = torch.div(coef, denom)
     return result
 
-
-def loss(z_pi, z_mu1, z_mu2, z_sigma1, z_sigma2, z_corr, z_pen_logits, x1, x2, pen, s, M, batch_size, N_max):
+def Lr(z_pi, z_mu1, z_mu2, z_sigma1, z_sigma2, z_corr, z_pen_logits, x1, x2, pen, s, M, batch_size, N_max):
     
     indices = []
     for i in range(len(s)): indices += [a+250*i for a in range(s[i])]
@@ -58,6 +58,19 @@ def loss(z_pi, z_mu1, z_mu2, z_sigma1, z_sigma2, z_corr, z_pen_logits, x1, x2, p
     
     return ls+lp
 
+def Lkl(mu, sigma):
+    # Without earl
+    Lkl = -0.5 * torch.mean(1 + sigma - mu.pow(2) - sigma.exp())     
+    return Lkl
+
+def early_stopping_Loss(Lr, wlk, Lkl, N_steps, R=0.99999, eta_min=1e-3, KLmin=1e-2):
+    Kl_min =KLmin
+    eta_step = 1.-(1.-eta_min)*np.power(R, N_steps)
+    #print("type Lkl: ",type(Lkl.data[0]),type(Lr.data[0]),type(0.0))
+    res=  Lr.data[0]+ wlk * eta_step * max(Lkl.data[0], Kl_min)
+    print("type res: ",type(res))    
+    return res
+    
 def Batch_Loss_LS_LP(X,Y_,M,N_max):
     
     l1,l2,l2 = Y_.size()
