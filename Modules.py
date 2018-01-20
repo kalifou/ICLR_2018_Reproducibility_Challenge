@@ -109,63 +109,77 @@ def proba_x_y(delta_x, delta_y, mu_x, mu_y, sig_x, sig_y, rho_xy):
 
 class Encoder(nn.Module):
     
-    def __init__(self, strokeSize, batchSize, Nh, Nz):
+    def __init__(self, strokeSize, batchSize,  Nhe, Nhd, Nz):
         super(Encoder, self).__init__()
         self.Nz = Nz
-        self.cell = nn.LSTM(strokeSize, Nh//2, 1, bidirectional=True, batch_first=True)
-        self.mu = nn.Linear(Nh, Nz)
-        self.sigma = nn.Linear(Nh, Nz)
-        self.h0 = nn.Linear(Nz, Nh)
+        self.Nhe = Nhe
+        self.Nhd = Nhd
+        self.cell = nn.LSTM(strokeSize, Nhe//2, 1, bidirectional=True, batch_first=True)
+        self.mu = nn.Linear(Nhe, Nz)
+        self.sigma = nn.Linear(Nhe, Nz)
+        self.h0 = nn.Linear(Nz, Nhd*2) # returns h0 and c0
+        #print(Nh)
 
     def forward(self, x):
         _, (hn, cn) = self.cell(x)
         hn = Variable(torch.cat((hn.data[0],hn.data[1]),1))
-        sigma_hat = self.sigma(hn)
+        sigma = self.sigma(hn)
         mu = self.mu(hn)
-        sigma = torch.exp( sigma_hat * 0.5)
-
+        s = sigma
+        sigma = torch.exp( sigma * 0.5)
         pre = torch.randn(self.Nz)
         if CUDA:
             pre = pre.cuda()
         eps = Variable(pre) 
         z = mu + sigma * eps
-        return F.tanh(self.h0(z)), z, mu, sigma_hat
+        return F.tanh(self.h0(z)), z, mu, s
         
         
 class Decoder(nn.Module):
     
-    def __init__(self, strokeSize, batchSize, Nh, Nz, Ny):
+    def __init__(self, strokeSize, batchSize,  Nhe, Nhd, Nz, Ny):
         super(Decoder, self).__init__()
-        self.Nh = Nh
-        self.cell = nn.LSTM(strokeSize+Nz, Nh, 1, batch_first=True)
-        self.y = nn.Linear(Nh, Ny)
+        self.Nhe = Nhe
+        self.Nhd = Nhd
+        self.cell = nn.LSTM(strokeSize+Nz, Nhd, 1, batch_first=True)
+        self.y = nn.Linear(Nhd, Ny)
     
-    def forward(self, x,):
-        output, (hn, cn) = self.cell(x)
+    def forward(self, x, h0, c0):
+        #print('sizes :',h0.size(),c0.size())
+        #print('sizes :',h0.size(),c0.size())
+        h0 = h0.view(1, h0.size()[0], h0.size()[1])
+        c0 = c0.view(1, c0.size()[0], c0.size()[1])
+        output, (hn, cn) = self.cell(x, (h0, c0))
+        #print('sizes :',h0.size(),c0.size())
+        #print('sizes :',h0.size(),c0.size())
         #print("avant reshape", output.size())
         #print(output.contiguous().view(-1, self.Nh).size())
-        output_ = output.contiguous().view(-1, self.Nh)
+        output = output.contiguous().view(-1, self.Nhd)
         #print("after", output.size())
-        y = self.y(output_)
-        return y, self.y(output)
-
+        y = self.y(output)
+        return y
+        
 class SketchRNN(nn.Module):
     
-    def __init__(self, strokeSize, batchSize, Nh, Nz, Ny, max_seq_len):
+    def __init__(self, strokeSize, batchSize, Nhe, Nhd, Nz, Ny, max_seq_len):
         super(SketchRNN, self).__init__()
         self.batchSize = batchSize
+        self.Nhe = Nhe
+        self.Nhd = Nhd
         self.max_seq_len = max_seq_len
         self.Nz = Nz
-        self.encoder = Encoder(strokeSize, batchSize, Nh, Nz)
-        self.decoder = Decoder(strokeSize, batchSize, Nh, Nz, Ny)
+        self.encoder = Encoder(strokeSize, batchSize, Nhe, Nhd, Nz)
+        self.decoder = Decoder(strokeSize, batchSize, Nhe, Nhd, Nz, Ny)
         
     def forward(self, x):
         # we don't take the inisiale S0 in the encoder so we do the 1:
         h0, z, mu, sigma = self.encoder(x[:, 1:250+1, :])
         #here we take S0
-        new_input = torch.cat((x[:, :250, :], z.view(self.batchSize, 1, self.Nz).expand(self.batchSize, self.max_seq_len, self.Nz)), 2)
-        y,y_old = self.decoder(new_input)
-        return y,y_old, mu, sigma
+        new_input = torch.cat((x[:, :250, :], z.view(self.batchSize, 1, self.Nz)\
+            .expand(self.batchSize, self.max_seq_len, self.Nz)), 2)        
+        y = self.decoder(new_input, h0[:,:self.Nhd].contiguous(), h0[:,self.Nhd:].contiguous())
+        #y = self.decoder(new_input, h0[:,:self.Nhd], h0[:,self.Nhd:])
+        return y, mu, sigma
     
 #class VAE(nn.Module):
 #    

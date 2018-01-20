@@ -62,7 +62,8 @@ cuda = True
 M = 20
 obs_size=5
 Y_size = 6*M+3
-N_h = 512 #4
+N_he = 512 #4
+N_hd = 512
 N_z = 128
 w_lk = 0.5
 lr=1e-3
@@ -73,7 +74,8 @@ if reload_:
     s2s_vae = pickle.load(open('sketch_rnn_save.p', 'rb'))
     print("Reload")
 else :
-    s2s_vae = SketchRNN(obs_size, batch_size,N_h, N_z, 6*M+3, max_seq_len)
+                        #strokeSize, batchSize, Nhe, Nhd, Nz, Ny, max_seq_len
+    s2s_vae = SketchRNN(obs_size, batch_size, N_he, N_hd, N_z, 6*M+3, max_seq_len)
 if cuda:
     s2s_vae.encoder.cuda()
     s2s_vae.decoder.cuda()
@@ -82,20 +84,28 @@ if cuda:
     print("Using cuda")
 
 optim = optim.Adam(s2s_vae.parameters(),lr) #to fill with missing optim params
-Lr=[]
-Lk =[]
-L_=[]
+
+Lr_train=[]
+Lk_train =[]
+L_train=[]
+
+Lr_test=[]
+Lk_test =[]
+L_test=[]
 
 for it in range(nb_steps):
-    optim.zero_grad()    
-    _, x, s = train_set.random_batch()
-    
-    x = torch.from_numpy(x).type(torch.FloatTensor)
-    input = x
+    optim.zero_grad()  
+
+    ################################
+    # On Train set
+    ################################
+    _, x_train, s = train_set.random_batch()    
+    x_train = torch.from_numpy(x_train).type(torch.FloatTensor)
+    input = x_train
     if cuda:
         input = input.cuda()
     input = Variable(input)
-    y, y_bis, mu, sigma = s2s_vae(input)
+    y, mu, sigma = s2s_vae(input)
     z_pen_logits = y[:, -3:]
     z_pi, z_mu1, z_mu2, z_sigma1, z_sigma2, z_corr = torch.chunk(y[:, :-3], 6, dim=1)
     z_pi = F.softmax(z_pi)
@@ -103,7 +113,7 @@ for it in range(nb_steps):
     z_sigma1 = torch.exp(z_sigma1)
     z_sigma2 = torch.exp(z_sigma2)
     z_corr = F.tanh(z_corr)
-    targets = x[:, 1:250+1, :].contiguous().view(-1, 5)
+    targets = x_train[:, 1:250+1, :].contiguous().view(-1, 5)
     x1 = targets[:,0]
     x2 = targets[:,1]
     pen = targets[:,2:]
@@ -112,42 +122,92 @@ for it in range(nb_steps):
     #print 'size LKL :',(1 + sigma- mu.pow(2) - sigma.exp()).size(),N_z
     L_kl=  (L_kl + 1e-6) / float(N_z*batch_size)
     #print('losses :',lr.data[0]," , ",L_kl.data[0])
-    Lr.append(lr.data[0])
-    Lk.append(L_kl.data[0])
-    L_.append(lr.data[0]+w_lk * L_kl.data[0])
+    Lr_train.append(lr.data[0])
+    Lk_train.append(L_kl.data[0])
+    L_train.append(lr.data[0]+w_lk * L_kl.data[0])
     (lr + w_lk * L_kl).backward()
     optim.step()
+    
+    ################################
+    # On Test Set
+    ################################
+    _, x_test, s = test_set.random_batch()    
+    x_test = torch.from_numpy(x_test).type(torch.FloatTensor)
+    input = x_test
+    if cuda:
+        input = input.cuda()
+    input = Variable(input)
+    y, mu, sigma = s2s_vae(input)
+    z_pen_logits = y[:, -3:]
+    z_pi, z_mu1, z_mu2, z_sigma1, z_sigma2, z_corr = torch.chunk(y[:, :-3], 6, dim=1)
+    z_pi = F.softmax(z_pi)
+    z_pen_logits = F.softmax(z_pen_logits)
+    z_sigma1 = torch.exp(z_sigma1)
+    z_sigma2 = torch.exp(z_sigma2)
+    z_corr = F.tanh(z_corr)
+    targets = x_test[:, 1:250+1, :].contiguous().view(-1, 5)
+    x1 = targets[:,0]
+    x2 = targets[:,1]
+    pen = targets[:,2:]
+    lr = loss(z_pi, z_mu1, z_mu2, z_sigma1, z_sigma2, z_corr, z_pen_logits, x1, x2, pen, s, M, batch_size, max_seq_len)
+    L_kl = -0.5 * torch.sum(1 + sigma- mu.pow(2) - sigma.exp()+1e-6) 
+    #print 'size LKLTrue :',(1 + sigma- mu.pow(2) - sigma.exp()).size(),N_z
+    L_kl=  (L_kl + 1e-6) / float(N_z*batch_size)
+    #print('losses :',lr.data[0]," , ",L_kl.data[0])
+    Lr_test.append(lr.data[0])
+    Lk_test.append(L_kl.data[0])
+    L_test.append(lr.data[0]+w_lk * L_kl.data[0])
+    
+    
 
-    if (it%200)==0:
+    if ((it+1)%200)==0:
+        print("Iter :",it)
         print('losses :',lr.data[0]," , ",L_kl.data[0])
+        Lk_train = np.nan_to_num(Lk_train)
+        Lr_train = np.nan_to_num(Lr_train)
+        L_train  = np.nan_to_num(L_train)
+        
+        Lk_test = np.nan_to_num(Lk_test)
+        Lr_test = np.nan_to_num(Lr_test)
+        L_test  = np.nan_to_num(L_test)
+        #x_range = [ 1+i for i in range(len(Lk))]
+        fig = plt.figure(figsize=(7,6))    
 
+        fig.suptitle("Loss KL",fontsize=15)
+        plt.plot(range(len(Lk_test)),Lk_test, 'b-',label="test")
+        plt.plot(range(len(Lk_train)),Lk_train, 'r-',label="train")
+        plt.legend(bbox_to_anchor=(1.05, 1), loc=1, borderaxespad=0.)
+        plt.xlabel("Batches", fontsize=12)
+        plt.savefig("plots/L_lk.png")
+
+        fig = plt.figure(figsize=(7,6))    
+        fig.suptitle("Loss Lr",fontsize=15)
+        plt.plot(range(len(Lr_test)),Lr_test, 'b-',label="test")
+        plt.plot(range(len(Lr_train)),Lr_train, 'r-',label="train")
+        plt.legend(bbox_to_anchor=(1.05, 1), loc=1, borderaxespad=0.)
+        plt.xlabel("Batches", fontsize=12)
+        plt.savefig("plots/L_lr.png")
+
+
+        fig = plt.figure(figsize=(7,6))    
+        fig.suptitle("L_r + w_lk x L_kl",fontsize=15)
+        plt.plot(range(len(L_test)),L_test, 'b-',label="test")
+        plt.plot(range(len(L_train)),L_train, 'r-',label="train")
+        plt.legend(bbox_to_anchor=(1.05, 1), loc=1, borderaxespad=0.)
+        plt.xlabel("Batches", fontsize=12)
+        plt.savefig("plots/L_total.png")
+        Lk_test = Lk_test.tolist()
+        Lr_test = Lr_test.tolist()
+        L_test = L_test.tolist()
+        
+        Lk_train = Lk_train.tolist()
+        Lr_train = Lr_train.tolist()
+        L_train = L_train.tolist()
+            
     if ((it+1) % 2000) == 0:
         print("Iter :",it," saving model")
         pickle.dump(s2s_vae, open('sketch_rnn_save.p', 'wb'))
 
-Lk = np.nan_to_num(Lk)
-Lr = np.nan_to_num(Lr)
-L_ = np.nan_to_num(L_)
-#x_range = [ 1+i for i in range(len(Lk))]
-fig = plt.figure(figsize=(7,6))    
-
-fig.suptitle("Loss KL",fontsize=15)
-plt.plot(range(len(Lk)),Lk, 'b-')
-plt.xlabel("Batches", fontsize=12)
-plt.savefig("plots/L_lk.png")
-
-fig = plt.figure(figsize=(7,6))    
-fig.suptitle("Loss Lr",fontsize=15)
-plt.plot(range(len(Lr)),Lr, 'r-')
-plt.xlabel("Batches", fontsize=12)
-plt.savefig("plots/L_lr.png")
-
-
-fig = plt.figure(figsize=(7,6))    
-fig.suptitle("L_r + w_lk x L_kl",fontsize=15)
-plt.plot(range(len(L_)),L_, 'g-')
-plt.xlabel("Batches", fontsize=12)
-plt.savefig("plots/L_total.png")
 
 t2 = time.time()-t1
 print("Exec duration(s) : ",t2)
