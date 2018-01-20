@@ -12,10 +12,18 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 
+global CUDA
+CUDA = True
+
 def bi_normal(x1, x2, mu1, mu2, s1, s2, rho,M):
-    
-    x1 = Variable(x1.contiguous().view(-1, 1).expand(x1.size(0), M))
-    x2 = Variable(x2.contiguous().view(-1, 1).expand(x1.size(0), M))
+
+    pre_x1 = x1.contiguous().view(-1, 1).expand(x1.size(0), M)
+    pre_x2 = x2.contiguous().view(-1, 1).expand(x1.size(0), M)
+    if CUDA:
+        pre_x2 = pre_x2.cuda()
+        pre_x1 = pre_x1.cuda()
+    x1 = Variable(pre_x1)
+    x2 = Variable(pre_x2)
     #print type(x1),type(mu1)
     norm1 = x1 - mu1
     norm2 = x2 - mu2
@@ -40,7 +48,9 @@ def loss(z_pi, z_mu1, z_mu2, z_sigma1, z_sigma2, z_corr, z_pen_logits, x1, x2, p
     #print "max :",ls.max()
     #print "dim ls :",ls.size(),x1.size()[0]
     ls = torch.sum(ls) / x1.size()[0]  
-    lp = torch.log(z_pen_logits)
+    lp = torch.log(z_pen_logits+ 1e-6)
+    if CUDA:
+        pen = pen.cuda()
     lp = torch.mul(lp.data, pen)
     lp = - torch.sum(lp, 1, keepdim=True)
     lp = torch.sum(lp) / x1.size()[0]
@@ -113,7 +123,11 @@ class Encoder(nn.Module):
         sigma_hat = self.sigma(hn)
         mu = self.mu(hn)
         sigma = torch.exp( sigma_hat * 0.5)
-        eps = Variable(torch.randn(self.Nz))
+
+        pre = torch.randn(self.Nz)
+        if CUDA:
+            pre = pre.cuda()
+        eps = Variable(pre) 
         z = mu + sigma * eps
         return F.tanh(self.h0(z)), z, mu, sigma_hat
         
