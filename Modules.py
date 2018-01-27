@@ -180,12 +180,17 @@ class Decoder(nn.Module):
     def predict(self, x, h, c, z, M):
         out = []
         tmp = 0.5
-        new_input = torch.cat((x[:, 0, :].contiguous().view(self.batchSize, 1, 5), z.view(self.batchSize, 1, self.Nz)), 2)
+        #new_input = torch.cat((x[:, 0, :].contiguous().view(self.batchSize, 1, 5), z.view(self.batchSize, 1, self.Nz)), 2)
+        new_input = torch.cat((x[:, 0, :].contiguous().view(1, 1, 5), z.view(1, 1, self.Nz)), 2)
+
+        h = h.view(1, h.size()[0], h.size()[1])
+        c = c.view(1, c.size()[0], c.size()[1])
         
         for i in range(0,250):
-            h = h.view(1, h.size()[0], h.size()[1])
-            c = c.view(1, c.size()[0], c.size()[1])
-        
+            #print('Size h - predict:',h.size())
+            #h = h.view(1, h.size()[0], h.size()[1])
+            #c = c.view(1, c.size()[0], c.size()[1])
+            #print("type h c :",type(h),type(c))
             y, (h, c) = self.cell(new_input, (h, c))
             output = y.contiguous().view(-1, self.Nhd)
             y = self.y(output)
@@ -203,7 +208,7 @@ class Decoder(nn.Module):
             else:
                 probs = z_pi.data[0].numpy()
             probs /= probs.sum()
-            print('probs :', probs.size,M)            
+            #print('probs :', probs.size,M)            
             i = np.random.choice(np.arange(0, M), p=probs)
             #print('done')
             mean = [z_mu1.data[0][i], z_mu2.data[0][i]]
@@ -227,12 +232,19 @@ class Decoder(nn.Module):
             if iPen == 2:
                 break
             
-            out.append(stroke)    
-            stroke = Variable(torch.FloatTensor(stroke))
-            print('Types:',type(stroke.contiguous().view(self.batchSize, 1, 5)), type(z.view(self.batchSize, 1, self.Nz)))
-            print('Sizes :',stroke.contiguous().view(self.batchSize, 1, 5).size(), z.view(self.batchSize, 1, self.Nz).size())
-            new_input = torch.cat((stroke.contiguous().view(self.batchSize, 1, 5), z.view(self.batchSize, 1, self.Nz)), 2)            
-            #new_input = torch.cat((stroke.contiguous(), z), 2)
+            out.append(stroke)
+
+            stroke = torch.FloatTensor(stroke)
+            if CUDA:
+                stroke = stroke.cuda()
+            stroke = Variable(stroke)
+
+            #print('Types:',type(stroke.contiguous().view(self.batchSize, 1, 5)), type(z.view(self.batchSize, 1, self.Nz)))
+            #print('Sizes :',stroke.contiguous().view(self.batchSize, 1, 5).size(), z.view(self.batchSize, 1, self.Nz).size())
+            #new_input = torch.cat((stroke.contiguous().view(self.batchSize, 1, 5), z.view(self.batchSize, 1, self.Nz).data), 2)            
+            new_input = torch.cat((stroke.contiguous().view(1, 1, 5), z.view(1, 1, self.Nz).data), 2)            
+            if CUDA:
+                new_input = new_input.cuda()
             
         return out
         
