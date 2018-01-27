@@ -130,7 +130,8 @@ class Encoder(nn.Module):
         self.Nhe = Nhe
         self.Nhd = Nhd
         self.cell = nn.LSTM(strokeSize, Nhe//2, 1, dropout=dropout, bidirectional=True, batch_first=True)
-        self.mu = nn.Linear(Nhe, Nz)
+        self.layerNorm = nn.InstanceNorm1d(Nhe, eps=1e-05, momentum=0.1, affine=False)
+	self.mu = nn.Linear(Nhe, Nz)
         self.sigma = nn.Linear(Nhe, Nz)
         self.h0 = nn.Linear(Nz, Nhd*2) # returns h0 and c0
         #print(Nh)
@@ -138,6 +139,7 @@ class Encoder(nn.Module):
     def forward(self, x):
         _, (hn, cn) = self.cell(x)
         hn = Variable(torch.cat((hn.data[0],hn.data[1]),1))
+	hn = self.layerNorm(hn)
         sigma = self.sigma(hn)
         mu = self.mu(hn)
         s = sigma
@@ -159,6 +161,7 @@ class Decoder(nn.Module):
         self.Nz = Nz
         self.batchSize = batchSize
         self.cell = nn.LSTM(strokeSize+Nz, Nhd, 1, dropout=dropout, batch_first=True)
+	self.layerNorm = nn.InstanceNorm1d(Nhd, eps=1e-05, momentum=0.1, affine=False)
         self.y = nn.Linear(Nhd, Ny)
     
     def forward(self, x, h0, c0):
@@ -172,6 +175,7 @@ class Decoder(nn.Module):
         #print("avant reshape", output.size())
         #print(output.contiguous().view(-1, self.Nh).size())
         output = output.contiguous().view(-1, self.Nhd)
+	hn = self.layerNorm(output)
         #print("after", output.size())
         y = self.y(output)
         return y
