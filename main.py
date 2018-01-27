@@ -134,7 +134,7 @@ for it in range(nb_steps):
     #print('losses :',lr.data[0]," , ",L_kl.data[0])
     Lr_train.append(lr.data[0])
     Lk_train.append(L_kl.data[0])
-    L_train_early_stopping.append(early_stopping_Loss(lr,w_lk,L_kl, it).data[0])
+    #L_train_early_stopping.append(early_stopping_Loss(lr,w_lk,L_kl, it).data[0])
 
     if early_stopping :
         L_train.append(early_stopping_Loss(lr,w_lk,L_kl, it).data[0])
@@ -173,14 +173,14 @@ for it in range(nb_steps):
     
     Lr_test.append(lr.data[0])
     Lk_test.append(L_kl.data[0])
-    L_test_early_stopping.append(early_stopping_Loss(lr,w_lk,L_kl, it).data[0])
+    #L_test_early_stopping.append(early_stopping_Loss(lr,w_lk,L_kl, it).data[0])
 
-    if early_stopping :
-        L_test.append(early_stopping_Loss(lr,w_lk,L_kl, it).data[0])
-        early_stopping_Loss(lr,w_lk,L_kl, it).backward()
-    else:            
-        L_test.append(lr.data[0]+w_lk * L_kl.data[0])
-        (lr + w_lk * L_kl).backward()    
+    #if early_stopping :
+    #    L_test.append(early_stopping_Loss(lr,w_lk,L_kl, it).data[0])
+    #    early_stopping_Loss(lr,w_lk,L_kl, it).backward()
+    #else:            
+    #    L_test.append(lr.data[0]+w_lk * L_kl.data[0])
+    #    (lr + w_lk * L_kl).backward()    
 
     if ((it+1)%10)==0:
         print("Iter :",it)
@@ -215,8 +215,8 @@ for it in range(nb_steps):
         fig.suptitle("L_r + w_lk x L_kl",fontsize=15)
         plt.plot(range(len(L_test)),L_test, 'b-',label="test")
         plt.plot(range(len(L_train)),L_train, 'r-',label="train")
-        plt.plot(range(len(L_train_early_stopping)),L_train_early_stopping, 'g-',label="Early_train ")
-        plt.plot(range(len(L_test_early_stopping)),L_test_early_stopping, 'y-',label="Early_test ")
+        #plt.plot(range(len(L_train_early_stopping)),L_train_early_stopping, 'g-',label="Early_train ")
+        #plt.plot(range(len(L_test_early_stopping)),L_test_early_stopping, 'y-',label="Early_test ")
         
         plt.legend(bbox_to_anchor=(1.05, 1), loc=1, borderaxespad=0.)
         plt.xlabel("Batches", fontsize=12)
