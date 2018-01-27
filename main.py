@@ -4,9 +4,11 @@ Created on Wed Jan  3 17:26:00 2018
 
 @author: kalifou
 """
+import os
 import numpy as np
 import utils
 import torch 
+import torch.nn as nn
 from torch.autograd import Variable
 from Modules import  SketchRNN, Lr, Lkl, early_stopping_Loss
 import torch.optim as optim
@@ -16,7 +18,8 @@ import torch.backends.cudnn as cudnn
 import time
 import _pickle as pickle
 
-
+os.environ['QT_QPA_PLATFORM']='offscreen'
+ 
 t1 = time.time()
 filename = "sketch-rnn-datasets/aaron_sheep/aaron_sheep.npz"
 load_data = np.load(filename, encoding = 'latin1')
@@ -58,6 +61,7 @@ test_set = utils.DataLoader(
       augment_stroke_prob=0.0)
 test_set.normalize(normalizing_scale_factor)
 
+grad_clipping = 1.0
 early_stopping = False
 reload_ = False
 cuda = True
@@ -143,6 +147,9 @@ for it in range(nb_steps):
         L_train.append(lr.data[0]+w_lk * L_kl.data[0])
         (lr + w_lk * L_kl).backward()
 
+    # gradient cliping
+    nn.utils.clip_grad_norm(s2s_vae.encoder.parameters(), grad_clipping)
+    nn.utils.clip_grad_norm(s2s_vae.encoder.parameters(), grad_clipping)
     optim.step()
     
     ################################

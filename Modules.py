@@ -124,12 +124,12 @@ def proba_x_y(delta_x, delta_y, mu_x, mu_y, sig_x, sig_y, rho_xy):
 
 class Encoder(nn.Module):
     
-    def __init__(self, strokeSize, batchSize,  Nhe, Nhd, Nz):
+    def __init__(self, strokeSize, batchSize,  Nhe, Nhd, Nz,dropout=0.1):
         super(Encoder, self).__init__()
         self.Nz = Nz
         self.Nhe = Nhe
         self.Nhd = Nhd
-        self.cell = nn.LSTM(strokeSize, Nhe//2, 1, bidirectional=True, batch_first=True)
+        self.cell = nn.LSTM(strokeSize, Nhe//2, 1, dropout=dropout, bidirectional=True, batch_first=True)
         self.mu = nn.Linear(Nhe, Nz)
         self.sigma = nn.Linear(Nhe, Nz)
         self.h0 = nn.Linear(Nz, Nhd*2) # returns h0 and c0
@@ -152,13 +152,13 @@ class Encoder(nn.Module):
         
 class Decoder(nn.Module):
     
-    def __init__(self, strokeSize, batchSize,  Nhe, Nhd, Nz, Ny):
+    def __init__(self, strokeSize, batchSize,  Nhe, Nhd, Nz, Ny,dropout=0.1):
         super(Decoder, self).__init__()
         self.Nhe = Nhe
         self.Nhd = Nhd
         self.Nz = Nz
         self.batchSize = batchSize
-        self.cell = nn.LSTM(strokeSize+Nz, Nhd, 1, batch_first=True)
+        self.cell = nn.LSTM(strokeSize+Nz, Nhd, 1, dropout=dropout, batch_first=True)
         self.y = nn.Linear(Nhd, Ny)
     
     def forward(self, x, h0, c0):
@@ -229,7 +229,10 @@ class Decoder(nn.Module):
             
             out.append(stroke)    
             stroke = Variable(torch.FloatTensor(stroke))
-            new_input = torch.cat((stroke.contiguous().view(self.batchSize, 1, 5), z.view(self.batchSize, 1, self.Nz)), 2)
+            print('Types:',type(stroke.contiguous().view(self.batchSize, 1, 5)), type(z.view(self.batchSize, 1, self.Nz)))
+            print('Sizes :',stroke.contiguous().view(self.batchSize, 1, 5).size(), z.view(self.batchSize, 1, self.Nz).size())
+            new_input = torch.cat((stroke.contiguous().view(self.batchSize, 1, 5), z.view(self.batchSize, 1, self.Nz)), 2)            
+            #new_input = torch.cat((stroke.contiguous(), z), 2)
             
         return out
         

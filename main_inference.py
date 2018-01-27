@@ -42,7 +42,7 @@ normalizing_scale_factor = train_set.calculate_normalizing_scale_factor()
 train_set.normalize(normalizing_scale_factor)
 
 
-reload_ = False #True
+reload_ = True
 cuda = True
 M = 20
 obs_size=5
