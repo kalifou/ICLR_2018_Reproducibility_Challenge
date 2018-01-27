@@ -63,12 +63,14 @@ def Lkl(mu, sigma):
     Lkl = -0.5 * torch.mean(1 + sigma - mu.pow(2) - sigma.exp())     
     return Lkl
 
-def early_stopping_Loss(Lr, wlk, Lkl, N_steps, R=0.99999, eta_min=1e-3, KLmin=1e-2):
-    Kl_min =KLmin
-    eta_step = 1.-(1.-eta_min)*np.power(R, N_steps)
-    #print("type Lkl: ",type(Lkl.data[0]),type(Lr.data[0]),type(0.0))
-    res=  Lr.data[0]+ wlk * eta_step * max(Lkl.data[0], Kl_min)
-    print("type res: ",type(res))    
+def early_stopping_Loss(Lr, wlk, Lkl, N_steps, R=0.99999, eta_min=1e-2, KLmin= 5*1e-3):
+    Kl_min = Variable(torch.FloatTensor([KLmin]))
+    if CUDA:
+        Kl_min = Kl_min.cuda()
+        Lkl = Lkl.cuda()
+        Lr = Lr.cuda()
+    eta_step = 1. -(1. -eta_min)* (R**N_steps)
+    res=  Lr + wlk * eta_step * torch.max(Lkl, Kl_min)
     return res
     
 def Batch_Loss_LS_LP(X,Y_,M,N_max):
@@ -154,6 +156,8 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         self.Nhe = Nhe
         self.Nhd = Nhd
+        self.Nz = Nz
+        self.batchSize = batchSize
         self.cell = nn.LSTM(strokeSize+Nz, Nhd, 1, batch_first=True)
         self.y = nn.Linear(Nhd, Ny)
     
@@ -173,12 +177,15 @@ class Decoder(nn.Module):
         return y
 
 	
-    def predict(self, x, h, c, z):
+    def predict(self, x, h, c, z, M):
         out = []
         tmp = 0.5
         new_input = torch.cat((x[:, 0, :].contiguous().view(self.batchSize, 1, 5), z.view(self.batchSize, 1, self.Nz)), 2)
         
         for i in range(0,250):
+            h = h.view(1, h.size()[0], h.size()[1])
+            c = c.view(1, c.size()[0], c.size()[1])
+        
             y, (h, c) = self.cell(new_input, (h, c))
             output = y.contiguous().view(-1, self.Nhd)
             y = self.y(output)
@@ -191,17 +198,25 @@ class Decoder(nn.Module):
             z_corr = F.tanh(z_corr)
             #normalize the probs to get 1 
 
-            probs = z_pi.data[0].numpy()
+            if CUDA:
+                probs = z_pi.data[0].cpu().numpy()
+            else:
+                probs = z_pi.data[0].numpy()
             probs /= probs.sum()
-            i = np.random.choice(np.arange(0, 2), p= probs)
-
+            print('probs :', probs.size,M)            
+            i = np.random.choice(np.arange(0, M), p=probs)
+            #print('done')
             mean = [z_mu1.data[0][i], z_mu2.data[0][i]]
             cov = [[z_sigma1.data[0][i] * z_sigma1.data[0][i] * tmp, z_corr.data[0][i] * z_sigma1.data[0][i] * z_sigma2.data[0][i]], \
                    [z_corr.data[0][i] * z_sigma1.data[0][i] * z_sigma2.data[0][i], z_sigma2.data[0][i] * z_sigma2.data[0][i] * tmp]]
 
             x = np.random.multivariate_normal(mean, cov)
-            probs = z_pen_logits.data[0].numpy()
+            if CUDA:
+                probs = z_pen_logits.data[0].cpu().numpy()
+            else:
+                probs = z_pen_logits.data[0].numpy()
             probs /= probs.sum()
+            #print('probs :',probs)
             iPen = np.random.choice(np.arange(0, 3), p=probs)
             pen = [0, 0, 0]
             pen[iPen] = 1
@@ -240,10 +255,10 @@ class SketchRNN(nn.Module):
         #y = self.decoder(new_input, h0[:,:self.Nhd], h0[:,self.Nhd:])
         return y, mu, sigma
 
-    def predict(self, x):
+    def predict(self, x, M):
         
         h0, z, mu, sigma = self.encoder(x[:, 1:250+1, :])
-        y = self.decoder.predict(x[:, :250, :], h0[:,:self.Nhd], h0[:,self.Nhd:], z)
+        y = self.decoder.predict(x[:, :250, :].contiguous(), h0[:,:self.Nhd].contiguous(), h0[:,self.Nhd:].contiguous(), z, M)
     
 #class VAE(nn.Module):
 #    

@@ -8,13 +8,14 @@ import numpy as np
 import utils
 import torch 
 from torch.autograd import Variable
-from Modules import Batch_Loss_LS_LP, proba_x_y,bi_normal,loss, SketchRNN
+from Modules import  SketchRNN, Lr, Lkl, early_stopping_Loss
 import torch.optim as optim
 from matplotlib import pyplot as plt
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 import time
 import _pickle as pickle
+
 
 t1 = time.time()
 filename = "sketch-rnn-datasets/aaron_sheep/aaron_sheep.npz"
@@ -57,6 +58,7 @@ test_set = utils.DataLoader(
       augment_stroke_prob=0.0)
 test_set.normalize(normalizing_scale_factor)
 
+early_stopping = False
 reload_ = False
 cuda = True
 M = 20
@@ -66,7 +68,7 @@ N_he = 512 #4
 N_hd = 512
 N_z = 128
 w_lk = 0.5
-lr=1e-3
+lr=1e-4
 N_max = max_seq_len
 X_decoder_size = N_z * batch_size + obs_size
 
@@ -83,15 +85,21 @@ if cuda:
     cudnn.benchmark = True
     print("Using cuda")
 
+if early_stopping:
+    print("Using early stopping")
+    
 optim = optim.Adam(s2s_vae.parameters(),lr) #to fill with missing optim params
 
 Lr_train=[]
 Lk_train =[]
+L_train_early_stopping =[]
 L_train=[]
 
 Lr_test=[]
 Lk_test =[]
 L_test=[]
+L_test_early_stopping=[]
+
 
 for it in range(nb_steps):
     optim.zero_grad()  
@@ -117,15 +125,24 @@ for it in range(nb_steps):
     x1 = targets[:,0]
     x2 = targets[:,1]
     pen = targets[:,2:]
-    lr = loss(z_pi, z_mu1, z_mu2, z_sigma1, z_sigma2, z_corr, z_pen_logits, x1, x2, pen, s, M, batch_size, max_seq_len)
-    L_kl = -0.5 * torch.sum(1 + sigma- mu.pow(2) - sigma.exp()+1e-6) 
-    #print 'size LKL :',(1 + sigma- mu.pow(2) - sigma.exp()).size(),N_z
-    L_kl=  (L_kl + 1e-6) / float(N_z*batch_size)
+   
+    lr =Lr(z_pi, z_mu1, z_mu2, z_sigma1, z_sigma2, z_corr, z_pen_logits, x1, x2, pen, s, M, batch_size, max_seq_len)
+    #print("lr" ,lr.data[0])
+    L_kl = Lkl(mu, sigma)
+    L_kl=  (L_kl + 1e-6) # / float(N_z) #*batch_size)
+    
     #print('losses :',lr.data[0]," , ",L_kl.data[0])
     Lr_train.append(lr.data[0])
     Lk_train.append(L_kl.data[0])
-    L_train.append(lr.data[0]+w_lk * L_kl.data[0])
-    (lr + w_lk * L_kl).backward()
+    L_train_early_stopping.append(early_stopping_Loss(lr,w_lk,L_kl, it).data[0])
+
+    if early_stopping :
+        L_train.append(early_stopping_Loss(lr,w_lk,L_kl, it).data[0])
+        early_stopping_Loss(lr,w_lk,L_kl, it).backward()
+    else:            
+        L_train.append(lr.data[0]+w_lk * L_kl.data[0])
+        (lr + w_lk * L_kl).backward()
+
     optim.step()
     
     ################################
@@ -149,18 +166,23 @@ for it in range(nb_steps):
     x1 = targets[:,0]
     x2 = targets[:,1]
     pen = targets[:,2:]
-    lr = loss(z_pi, z_mu1, z_mu2, z_sigma1, z_sigma2, z_corr, z_pen_logits, x1, x2, pen, s, M, batch_size, max_seq_len)
-    L_kl = -0.5 * torch.sum(1 + sigma- mu.pow(2) - sigma.exp()+1e-6) 
-    #print 'size LKLTrue :',(1 + sigma- mu.pow(2) - sigma.exp()).size(),N_z
-    L_kl=  (L_kl + 1e-6) / float(N_z*batch_size)
-    #print('losses :',lr.data[0]," , ",L_kl.data[0])
+    
+    lr = Lr(z_pi, z_mu1, z_mu2, z_sigma1, z_sigma2, z_corr, z_pen_logits, x1, x2, pen, s, M, batch_size, max_seq_len)    
+    L_kl = Lkl(mu, sigma)
+    L_kl=  (L_kl + 1e-6) #/ float(N_z*batch_size)
+    
     Lr_test.append(lr.data[0])
     Lk_test.append(L_kl.data[0])
-    L_test.append(lr.data[0]+w_lk * L_kl.data[0])
-    
-    
+    L_test_early_stopping.append(early_stopping_Loss(lr,w_lk,L_kl, it).data[0])
 
-    if ((it+1)%200)==0:
+    if early_stopping :
+        L_test.append(early_stopping_Loss(lr,w_lk,L_kl, it).data[0])
+        early_stopping_Loss(lr,w_lk,L_kl, it).backward()
+    else:            
+        L_test.append(lr.data[0]+w_lk * L_kl.data[0])
+        (lr + w_lk * L_kl).backward()    
+
+    if ((it+1)%10)==0:
         print("Iter :",it)
         print('losses :',lr.data[0]," , ",L_kl.data[0])
         Lk_train = np.nan_to_num(Lk_train)
@@ -178,7 +200,7 @@ for it in range(nb_steps):
         plt.plot(range(len(Lk_train)),Lk_train, 'r-',label="train")
         plt.legend(bbox_to_anchor=(1.05, 1), loc=1, borderaxespad=0.)
         plt.xlabel("Batches", fontsize=12)
-        plt.savefig("plots/L_lk.png")
+        plt.savefig("tmp/L_lk.png")
 
         fig = plt.figure(figsize=(7,6))    
         fig.suptitle("Loss Lr",fontsize=15)
@@ -186,16 +208,19 @@ for it in range(nb_steps):
         plt.plot(range(len(Lr_train)),Lr_train, 'r-',label="train")
         plt.legend(bbox_to_anchor=(1.05, 1), loc=1, borderaxespad=0.)
         plt.xlabel("Batches", fontsize=12)
-        plt.savefig("plots/L_lr.png")
+        plt.savefig("tmp/L_lr.png")
 
 
         fig = plt.figure(figsize=(7,6))    
         fig.suptitle("L_r + w_lk x L_kl",fontsize=15)
         plt.plot(range(len(L_test)),L_test, 'b-',label="test")
         plt.plot(range(len(L_train)),L_train, 'r-',label="train")
+        plt.plot(range(len(L_train_early_stopping)),L_train_early_stopping, 'g-',label="Early_train ")
+        plt.plot(range(len(L_test_early_stopping)),L_test_early_stopping, 'y-',label="Early_test ")
+        
         plt.legend(bbox_to_anchor=(1.05, 1), loc=1, borderaxespad=0.)
         plt.xlabel("Batches", fontsize=12)
-        plt.savefig("plots/L_total.png")
+        plt.savefig("tmp/L_total.png")
         Lk_test = Lk_test.tolist()
         Lr_test = Lr_test.tolist()
         L_test = L_test.tolist()
